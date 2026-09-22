@@ -311,6 +311,7 @@ body { background: #edf2e7; }
 .summary .calculate { width: 100%; min-width: 0; margin-top: auto; }
 .summary .errors { margin-top: 16px; font-size: .8rem; }
 .overlap-note { margin: 12px 0 0; padding: 9px 11px; border-radius: 8px; background: #fff3c9; color: #6e5415 !important; font-size: .76rem; }
+.free-rule-note { margin: 10px 0 0; color: #687a6c !important; font-size: .76rem; }
 .summary .errors ul { padding-left: 17px; }
 .site-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; color: #687c6c; font-size: .8rem; }
 .site-footer p { margin: 0; }

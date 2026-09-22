@@ -1,5 +1,6 @@
 export const MINUTES_PER_DAY = 1440;
 export const MINUTES_PER_WEEK = 10080;
+export const MIN_FREE_INTERVAL = 30;
 export const CATEGORIES = ['sleep', 'work', 'study', 'household', 'health', 'leisure', 'other'] as const;
 export type Category = typeof CATEGORIES[number];
 export type Mode = 'online' | 'offline';
@@ -145,11 +146,19 @@ export function calculateWeek(activities: Activity[]): CalculationResult {
       categories[owner.category]++;
       totals[owner.category]++;
     }
-    days.push({ day, occupiedMinutes, freeMinutes: MINUTES_PER_DAY - occupiedMinutes,
+    let freeMinutes = 0;
+    for (let start = 0; start < MINUTES_PER_DAY;) {
+      if (owners[start] !== null) { start++; continue; }
+      let end = start + 1;
+      while (end < MINUTES_PER_DAY && owners[end] === null) end++;
+      if (end - start > MIN_FREE_INTERVAL) freeMinutes += end - start;
+      start = end;
+    }
+    days.push({ day, occupiedMinutes, freeMinutes,
       overlapMinutes, categories, segments });
   }
   const weeklyOccupiedMinutes = days.reduce((sum, day) => sum + day.occupiedMinutes, 0);
-  const weeklyFreeMinutes = MINUTES_PER_WEEK - weeklyOccupiedMinutes;
+  const weeklyFreeMinutes = days.reduce((sum, day) => sum + day.freeMinutes, 0);
   return { ok: true, days, weeklyOccupiedMinutes, weeklyFreeMinutes,
     overlapMinutes: days.reduce((sum, day) => sum + day.overlapMinutes, 0),
     categories: { ...totals, free: weeklyFreeMinutes }, segments: intervals };

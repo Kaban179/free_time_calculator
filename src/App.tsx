@@ -301,6 +301,7 @@ export default function App() {
           <div className="donut-row"><div className="donut" style={{ '--free-percent': `${result.weeklyFreeMinutes / 10080 * 100}%` } as React.CSSProperties}>
             <span><strong>{formatMinutes(result.weeklyFreeMinutes)}</strong><small>свободно</small></span></div>
             <div className="donut-caption"><strong>{Math.round(result.weeklyFreeMinutes / 10080 * 100)}%</strong><span>недели<br />для себя</span></div></div>
+          <p className="free-rule-note">Учитываем только непрерывные промежутки больше 30 минут.</p>
           {result.overlapMinutes > 0 && <p className="overlap-note">Совмещено {formatMinutes(result.overlapMinutes)}. Эти минуты учтены один раз.</p>}
           {resultIsOld && <p className="outdated" role="status">План изменён — рассчитай снова.</p>}
           <h3>Свободно по дням</h3><div className="week-bars">{result.days.map((day, index) => <div className="week-bar-item" key={index}>
