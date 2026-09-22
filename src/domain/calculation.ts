@@ -124,6 +124,7 @@ export function calculateWeek(activities: Activity[]): CalculationResult {
 
   const totals = emptyCategories();
   const days: DayTotal[] = [];
+  const occupiedWeek = new Uint8Array(MINUTES_PER_WEEK);
   for (let day = 0; day < 7; day++) {
     const segments = intervals.filter(segment => segment.day === day)
       .sort((a, b) => a.startMinute - b.startMinute);
@@ -142,20 +143,34 @@ export function calculateWeek(activities: Activity[]): CalculationResult {
       const owner = owners[minute];
       if (owner === null) continue;
       occupiedMinutes++;
+      occupiedWeek[day * MINUTES_PER_DAY + minute] = 1;
       if (coverage[minute] > 1) overlapMinutes++;
       categories[owner.category]++;
       totals[owner.category]++;
     }
-    let freeMinutes = 0;
-    for (let start = 0; start < MINUTES_PER_DAY;) {
-      if (owners[start] !== null) { start++; continue; }
-      let end = start + 1;
-      while (end < MINUTES_PER_DAY && owners[end] === null) end++;
-      if (end - start > MIN_FREE_INTERVAL) freeMinutes += end - start;
-      start = end;
-    }
-    days.push({ day, occupiedMinutes, freeMinutes,
+    days.push({ day, occupiedMinutes, freeMinutes: 0,
       overlapMinutes, categories, segments });
+  }
+  const eligibleFree = new Uint8Array(MINUTES_PER_WEEK);
+  const anchor = occupiedWeek.findIndex(value => value === 1);
+  if (anchor === -1) eligibleFree.fill(1);
+  else {
+    let runStart = 0, runLength = 0;
+    for (let step = 1; step <= MINUTES_PER_WEEK; step++) {
+      const minute = (anchor + step) % MINUTES_PER_WEEK;
+      if (occupiedWeek[minute] === 0) {
+        if (runLength === 0) runStart = minute;
+        runLength++;
+      } else {
+        if (runLength > MIN_FREE_INTERVAL)
+          for (let offset = 0; offset < runLength; offset++) eligibleFree[(runStart + offset) % MINUTES_PER_WEEK] = 1;
+        runLength = 0;
+      }
+    }
+  }
+  for (const day of days) {
+    const start = day.day * MINUTES_PER_DAY;
+    day.freeMinutes = eligibleFree.slice(start, start + MINUTES_PER_DAY).reduce((sum, value) => sum + value, 0);
   }
   const weeklyOccupiedMinutes = days.reduce((sum, day) => sum + day.occupiedMinutes, 0);
   const weeklyFreeMinutes = days.reduce((sum, day) => sum + day.freeMinutes, 0);

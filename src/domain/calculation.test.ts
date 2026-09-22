@@ -39,10 +39,21 @@ describe('calculateWeek', () => {
   });
   it('allows touching boundaries', () => { const r = ok(calculateWeek([activity({ id: 'a' }), activity({ id: 'b', start: '10:00', end: '11:00' })])); expect(r.days[0].occupiedMinutes).toBe(120); });
   it('counts only free intervals longer than 30 minutes', () => {
-    const thirty = ok(calculateWeek([activity({ start: '00:00', end: '23:30' })]));
+    const thirty = ok(calculateWeek([
+      activity({ id: 'before', start: '00:00', end: '10:00' }),
+      activity({ id: 'after', start: '10:30', end: '00:00' }),
+    ]));
     expect(thirty.days[0].freeMinutes).toBe(0);
-    const thirtyOne = ok(calculateWeek([activity({ start: '00:00', end: '23:29' })]));
+    const thirtyOne = ok(calculateWeek([
+      activity({ id: 'before', start: '00:00', end: '10:00' }),
+      activity({ id: 'after', start: '10:31', end: '00:00' }),
+    ]));
     expect(thirtyOne.days[0].freeMinutes).toBe(31);
+  });
+  it('keeps a qualifying free interval continuous across midnight', () => {
+    const r = ok(calculateWeek([activity({ days: [0, 1, 2, 3, 4, 5, 6], start: '00:40', end: '23:50' })]));
+    expect(r.days[0].freeMinutes).toBe(50);
+    expect(r.weeklyFreeMinutes).toBe(350);
   });
   it('keeps category and free totals equal to a week', () => { const r = ok(calculateWeek([activity({ category: 'work' }), activity({ id: 'b', category: 'sleep', days: [1], start: '22:00', end: '06:00' })])); const total = Object.values(r.categories).reduce((a, b) => a + b, 0); expect(total).toBe(10080); });
   it('rejects invalid identity and travel values', () => { for (const value of [NaN, 1.5, -1, 241]) { const r = calculateWeek([activity({ travelBeforeMinutes: value })]); expect(r.ok).toBe(false); } expect(calculateWeek([activity({ id: '' })]).ok).toBe(false); expect(calculateWeek([activity({ title: 42 as unknown as string })]).ok).toBe(false); });
