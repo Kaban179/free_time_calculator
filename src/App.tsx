@@ -5,7 +5,7 @@ import { deleteActivityForDay, saveActivityForDays } from './domain/activity-edi
 import { CategoryIcon } from './CategoryIcon';
 
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-const STORAGE_KEY = 'free-time-calculator.activities.v1';
+const LEGACY_STORAGE_KEY = 'free-time-calculator.activities.v1';
 const LABELS: Record<Category | 'travel' | 'free', string> = {
   sleep: 'Сон', work: 'Работа', study: 'Учёба', household: 'Быт', health: 'Здоровье',
   leisure: 'Отдых', other: 'Другое', travel: 'Дорога', free: 'Свободно',
@@ -27,28 +27,6 @@ function formatMinutes(minutes: number): string {
 
 function formatClock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-}
-
-function isStoredActivity(value: unknown): value is Activity {
-  if (!value || typeof value !== 'object') return false;
-  const item = value as Activity;
-  const time = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-  return typeof item.id === 'string' && item.id.length > 0 && typeof item.title === 'string'
-    && CATEGORIES.includes(item.category) && Array.isArray(item.days) && item.days.length > 0
-    && item.days.every(day => Number.isInteger(day) && day >= 0 && day < 7)
-    && typeof item.start === 'string' && time.test(item.start)
-    && typeof item.end === 'string' && time.test(item.end) && item.start !== item.end
-    && (item.mode === 'online' || item.mode === 'offline')
-    && Number.isInteger(item.travelBeforeMinutes) && Number.isInteger(item.travelAfterMinutes)
-    && item.travelBeforeMinutes >= 0 && item.travelBeforeMinutes <= 240
-    && item.travelAfterMinutes >= 0 && item.travelAfterMinutes <= 240;
-}
-
-function readActivities(): Activity[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter(isStoredActivity) : [];
-  } catch { return []; }
 }
 
 function newActivity(day: number, category: Category = 'sleep'): Activity {
@@ -159,7 +137,7 @@ function TimeBlocks({ segments, activities, onEdit }: { segments: Segment[]; act
 }
 
 export default function App() {
-  const [activities, setActivities] = useState<Activity[]>(readActivities);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedDay, setSelectedDay] = useState(0);
   const [editing, setEditing] = useState<Activity>(() => suggestedActivity(0, activities));
   const [editingDay, setEditingDay] = useState<number | null>(null);
@@ -170,9 +148,8 @@ export default function App() {
   const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (activities.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
-    else localStorage.removeItem(STORAGE_KEY);
-  }, [activities]);
+    try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch { /* Storage may be disabled. */ }
+  }, []);
 
   const preview = useMemo(() => calculateWeek(activities), [activities]);
   const visualSegments = useMemo(() => visualiseSchedule(activities), [activities]);
@@ -288,12 +265,6 @@ export default function App() {
           : <div className="empty-plan"><p>Этот день пока свободен.</p><button className="secondary" onClick={() => openForm(suggestedActivity(selectedDay, activities))}>Добавить занятие</button></div>}
         {!preview.ok && <p className="timeline-note" role="status">В расписании есть пересечения. Блоки показаны, но итог появится после исправления ошибок.</p>}
         {segments.length > 0 && <p className="timeline-hint">Нажми на блок, чтобы изменить занятие.</p>}
-        {dayActivities.length > 0 && <div className="day-entries"><h3>Занятия дня</h3>
-          {dayActivities.map(item => <div className="day-entry" key={item.id}>
-            <CategoryIcon kind={item.category} size={17} />
-            <span>{item.title}<small>{item.start}–{item.end}{item.category === 'sleep' && item.end < item.start
-              ? ` · ночь на ${DAYS[selectedDay]}` : item.end < item.start ? ' · до следующего дня' : ''}</small></span>
-            <button className="text-button" onClick={() => openForm(item, selectedDay)}>Изменить</button></div>)}</div>}
       </section><ActivityForm key={`${editing.id || 'new'}-${formVersion}`} initial={editing} fixedDay={editingDay} selectedDay={selectedDay} onSave={saveActivity}
         onCancel={() => closeForm()} onDelete={editing.id ? () => deleteActivity(editing) : undefined} />
       <aside id="results" className="panel summary" aria-labelledby="summary-title"><p className="eyebrow">БАЛАНС НЕДЕЛИ</p>
@@ -317,7 +288,7 @@ export default function App() {
         {errors.length > 0 && <div className="errors" role="alert"><strong>Не удалось рассчитать неделю</strong>
           <ul>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
       </aside></div></section>
-    <footer className="site-footer"><p>Расписание сохраняется только в этом браузере.</p>
+    <footer className="site-footer"><p>Расписание существует только пока открыта эта страница.</p>
       <button className="text-button danger" onClick={clearActivities} disabled={!activities.length}>Очистить расписание</button></footer>
   </main>;
 }

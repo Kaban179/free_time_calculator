@@ -38,16 +38,18 @@ test('defaults, mirrored travel, day cards and recalculation', async ({ page }) 
   await expect(page.locator('#day-details .time-block.category-sleep')).toBeVisible();
   await page.locator('.day-card').first().click();
 
-  await page.reload();
-  await expect(page.locator('.day-card').first()).toContainText('Работа');
   await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
   await expect(page.locator('#results')).toContainText('158 ч 5 мин');
-  await page.locator('.day-entry').filter({ hasText: 'Работа' }).getByRole('button', { name: 'Изменить' }).click();
+  await page.locator('.time-block.category-work').click();
   await form.getByLabel('Конец').fill('11:00');
   await form.getByRole('button', { name: 'Сохранить изменения' }).click();
   await expect(page.locator('#results')).toContainText('План изменён');
   await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
   await expect(page.locator('#results')).toContainText('157 ч 5 мин');
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+  await page.reload();
+  await expect(page.locator('.day-card').first()).toContainText('Пока нет занятий');
+  await expect(page.locator('.time-block')).toHaveCount(0);
 });
 
 test('editing sleep changes one day and replacing sleep creates no duplicate', async ({ page }) => {
@@ -55,7 +57,7 @@ test('editing sleep changes one day and replacing sleep creates no duplicate', a
   const form = page.locator('#activity-form');
   await form.getByRole('button', { name: 'Добавить', exact: true }).click();
   await page.locator('.day-card').nth(1).click();
-  await page.locator('.day-entry').filter({ hasText: 'Сон' }).getByRole('button', { name: 'Изменить' }).click();
+  await page.locator('.time-block.category-sleep').first().click();
   await expect(form.locator('.edit-day-note')).toContainText('ночи на Вт');
   await form.getByLabel('Начало').fill('22:00');
   await form.getByRole('button', { name: 'Сохранить изменения' }).click();
@@ -69,7 +71,7 @@ test('editing sleep changes one day and replacing sleep creates no duplicate', a
   await form.getByLabel('Начало').fill('00:00');
   await form.getByLabel('Конец').fill('08:00');
   await form.getByRole('button', { name: 'Добавить', exact: true }).click();
-  await expect(page.locator('.day-entry').filter({ hasText: 'Сон' })).toHaveCount(1);
+  await expect(page.locator('.day-card').nth(1).locator('.day-card-activity').filter({ hasText: 'Сон' })).toHaveCount(1);
   await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
   await expect(page.locator('#results')).toContainText('112 ч');
   await expect(page.locator('.day-card').nth(3)).toContainText('8 ч');
@@ -109,11 +111,12 @@ test('conflicting activity is rejected when added', async ({ page }) => {
   await form.getByLabel('Конец').fill('11:00');
   await form.getByRole('button', { name: 'Добавить', exact: true }).click();
   await expect(form.getByRole('alert')).toContainText('пересекается с «Работа»');
-  await expect(page.locator('.day-entry')).toHaveCount(1);
+  await expect(page.locator('.time-block.category-work')).toHaveCount(1);
   await form.getByLabel('Начало').fill('19:00');
   await form.getByLabel('Конец').fill('20:00');
   await form.getByRole('button', { name: 'Добавить', exact: true }).click();
-  await expect(page.locator('.day-entry')).toHaveCount(2);
+  await expect(page.locator('.time-block.category-work')).toHaveCount(1);
+  await expect(page.locator('.time-block.category-study')).toHaveCount(1);
 });
 
 test('mobile layout keeps the page within the viewport', async ({ page }) => {

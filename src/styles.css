@@ -256,12 +256,6 @@ body { background: #edf2e7; }
 .time-block.shared-online.online-block { color: #a47711; background: #fff1bb; }
 .time-block strong { color: #24352b; }
 .timeline-hint { color: #708273; font-size: .75rem; margin: 14px 0 0; }
-.day-entries { margin-top: 16px; padding-top: 3px; border-top: 1px solid #edf1e9; }
-.day-entries h3 { font-size: .8rem; margin: 10px 0 4px; }
-.day-entry { display: flex; align-items: center; gap: 8px; min-height: 42px; border-bottom: 1px solid #f0f3ed; font-size: .8rem; }
-.day-entry > span:nth-child(2) { display: flex; flex: 1; min-width: 0; flex-direction: column; overflow: hidden; text-overflow: ellipsis; }
-.day-entry small { color: #6a7c6f; font-size: .7rem; }
-.day-entry .text-button { font-size: .75rem; }
 .empty-plan { min-height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; border: 1px dashed #dce5d7; border-radius: 12px; background: #fbfdf9; }
 .empty-plan p { margin: 0; color: #526b58; }
 .summary { background: #fff; }
