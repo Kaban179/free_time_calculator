@@ -9,6 +9,15 @@ const LABELS: Record<Category | 'travel' | 'free', string> = {
   sleep: 'Сон', work: 'Работа', study: 'Учёба', household: 'Быт', health: 'Здоровье',
   leisure: 'Отдых', other: 'Другое', travel: 'Дорога', free: 'Свободно',
 };
+const DEFAULTS: Record<Category, { title: string; start: string; end: string; mode: Activity['mode']; travel: number }> = {
+  sleep: { title: 'Сон', start: '23:00', end: '07:00', mode: 'online', travel: 0 },
+  work: { title: 'Работа', start: '09:00', end: '18:00', mode: 'offline', travel: 30 },
+  study: { title: 'Учёба', start: '10:00', end: '16:00', mode: 'offline', travel: 30 },
+  household: { title: 'Домашние дела', start: '18:00', end: '19:00', mode: 'online', travel: 0 },
+  health: { title: 'Тренировка', start: '19:00', end: '20:00', mode: 'offline', travel: 20 },
+  leisure: { title: 'Отдых', start: '20:00', end: '21:00', mode: 'online', travel: 0 },
+  other: { title: 'Другое дело', start: '19:00', end: '20:00', mode: 'online', travel: 0 },
+};
 
 function formatMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60), rest = minutes % 60;
@@ -41,15 +50,102 @@ function readActivities(): Activity[] {
   } catch { return []; }
 }
 
-function newActivity(day: number): Activity {
-  return { id: '', title: 'Сон', category: 'sleep', days: [day], start: '23:00', end: '07:00',
-    mode: 'online', travelBeforeMinutes: 0, travelAfterMinutes: 0 };
+function newActivity(day: number, category: Category = 'sleep'): Activity {
+  const preset = DEFAULTS[category];
+  return { id: '', title: preset.title, category, days: [day], start: preset.start, end: preset.end,
+    mode: preset.mode, travelBeforeMinutes: preset.travel, travelAfterMinutes: preset.travel };
+}
+
+// The visual schedule stays visible when overlapping entries make calculation impossible.
+function visualiseSchedule(activities: Activity[]): Segment[] {
+  const segments: Segment[] = [];
+  const dayMinutes = 1440, weekMinutes = 10080;
+  for (const item of activities) {
+    const start = Number(item.start.slice(0, 2)) * 60 + Number(item.start.slice(3));
+    const end = Number(item.end.slice(0, 2)) * 60 + Number(item.end.slice(3));
+    const duration = (end - start + dayMinutes) % dayMinutes;
+    const before = item.mode === 'offline' && item.category !== 'sleep' ? item.travelBeforeMinutes : 0;
+    const after = item.mode === 'offline' && item.category !== 'sleep' ? item.travelAfterMinutes : 0;
+    for (const day of item.days) {
+      const absolute = day * dayMinutes + start;
+      const ranges: [number, number, Segment['category']][] = [
+        [absolute - before, absolute, 'travel'],
+        [absolute, absolute + duration, item.category],
+        [absolute + duration, absolute + duration + after, 'travel'],
+      ];
+      for (const [rangeStart, rangeEnd, category] of ranges) {
+        for (let cursor = rangeStart; cursor < rangeEnd;) {
+          const wrapped = ((cursor % weekMinutes) + weekMinutes) % weekMinutes;
+          const segmentDay = Math.floor(wrapped / dayMinutes);
+          const startMinute = wrapped % dayMinutes;
+          const endMinute = Math.min(dayMinutes, startMinute + rangeEnd - cursor);
+          segments.push({ day: segmentDay, startMinute, endMinute, category,
+            activityId: item.id, title: item.title });
+          cursor += endMinute - startMinute;
+        }
+      }
+    }
+  }
+  return segments.sort((a, b) => a.day - b.day || a.startMinute - b.startMinute);
+}
+
+function cardItems(segments: Segment[], day: number) {
+  const items = new Map<string, { title: string; category: Segment['category']; minutes: number }>();
+  for (const segment of segments.filter(segment => segment.day === day && segment.category !== 'travel')) {
+    const key = `${segment.activityId}:${segment.category}`;
+    const previous = items.get(key);
+    items.set(key, { title: segment.title || LABELS[segment.category], category: segment.category,
+      minutes: (previous?.minutes ?? 0) + segment.endMinute - segment.startMinute });
+  }
+  return [...items.values()].sort((a, b) => b.minutes - a.minutes);
+}
+
+function TimeBlocks({ segments, activities, onEdit }: { segments: Segment[]; activities: Activity[]; onEdit: (item: Activity) => void }) {
+  const positioned = segments.map(segment => ({ segment, lane: 0, lanes: 1 }));
+  for (let groupStart = 0; groupStart < positioned.length;) {
+    let groupEnd = groupStart + 1;
+    let latestEnd = positioned[groupStart].segment.endMinute;
+    while (groupEnd < positioned.length && positioned[groupEnd].segment.startMinute < latestEnd) {
+      latestEnd = Math.max(latestEnd, positioned[groupEnd].segment.endMinute);
+      groupEnd++;
+    }
+    const laneEnds: number[] = [];
+    for (let index = groupStart; index < groupEnd; index++) {
+      const segment = positioned[index].segment;
+      let lane = laneEnds.findIndex(end => end <= segment.startMinute);
+      if (lane < 0) lane = laneEnds.length;
+      laneEnds[lane] = segment.endMinute;
+      positioned[index].lane = lane;
+    }
+    for (let index = groupStart; index < groupEnd; index++) positioned[index].lanes = laneEnds.length;
+    groupStart = groupEnd;
+  }
+  return <div className="time-layout"><div className="time-labels" aria-hidden="true">
+    {Array.from({ length: 13 }, (_, index) => <span key={index} style={{ top: `${index / 12 * 100}%` }}>{formatClock(index * 120)}</span>)}
+  </div><div className="time-track">
+    {Array.from({ length: 25 }, (_, index) => <div className="time-line" key={index} style={{ top: `${index / 24 * 100}%` }} />)}
+    {positioned.map(({ segment, lane, lanes }, index) => {
+      const activity = activities.find(item => item.id === segment.activityId);
+      const minutes = segment.endMinute - segment.startMinute;
+      const label = segment.category === 'travel' ? `Дорога · ${segment.title}` : segment.title || LABELS[segment.category];
+      return <button type="button" key={`${segment.activityId}-${segment.startMinute}-${index}`}
+        className={`time-block category-${segment.category}${minutes < 45 ? ' short' : ''}`}
+        style={{ top: `${segment.startMinute / 1440 * 100}%`, height: `${minutes / 1440 * 100}%`,
+          left: `calc(${lane / lanes * 100}% + ${lane === 0 ? 9 : 4}px)`,
+          right: `calc(${(lanes - lane - 1) / lanes * 100}% + 4px)` }}
+        title={`${label}, ${formatClock(segment.startMinute)}–${formatClock(segment.endMinute)}`}
+        onClick={() => activity && onEdit(activity)}>
+        <strong>{label}</strong>{minutes >= 45 && <small>{formatClock(segment.startMinute)}–{formatClock(segment.endMinute)}</small>}
+      </button>;
+    })}
+  </div></div>;
 }
 
 export default function App() {
   const [activities, setActivities] = useState<Activity[]>(readActivities);
   const [selectedDay, setSelectedDay] = useState(0);
-  const [editing, setEditing] = useState<Activity | null>(null);
+  const [editing, setEditing] = useState<Activity>(() => newActivity(0));
+  const [formVersion, setFormVersion] = useState(0);
   const [result, setResult] = useState<Calculation | null>(null);
   const [resultIsOld, setResultIsOld] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -61,16 +157,23 @@ export default function App() {
   }, [activities]);
 
   const preview = useMemo(() => calculateWeek(activities), [activities]);
+  const visualSegments = useMemo(() => visualiseSchedule(activities), [activities]);
   const dayActivities = activities.filter(item => item.days.includes(selectedDay))
     .sort((a, b) => a.start.localeCompare(b.start));
-  const segments = preview.ok ? preview.days[selectedDay].segments : [];
+  const segments = visualSegments.filter(segment => segment.day === selectedDay);
 
   function openForm(activity: Activity) {
     returnFocus.current = document.activeElement as HTMLElement;
     setEditing(activity);
+    setFormVersion(version => version + 1);
+    requestAnimationFrame(() => {
+      document.getElementById('activity-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.querySelector<HTMLInputElement>('#activity-form input:not([disabled])')?.focus({ preventScroll: true });
+    });
   }
   function closeForm() {
-    setEditing(null);
+    setEditing(newActivity(selectedDay));
+    setFormVersion(version => version + 1);
     requestAnimationFrame(() => returnFocus.current?.focus());
   }
   function updateActivities(next: Activity[]) {
@@ -106,10 +209,11 @@ export default function App() {
   function clearActivities() {
     if (!window.confirm('Очистить всё расписание на этом устройстве?')) return;
     setActivities([]); setResult(null); setResultIsOld(false); setErrors([]); setSelectedDay(0);
+    setEditing(newActivity(0)); setFormVersion(version => version + 1);
   }
 
   return <main className="app">
-    <header className="site-header"><div className="brand">◷ <span>Калькулятор<br />свободного времени</span></div>
+    <header className="site-header"><div className="brand"><span>Калькулятор<br />свободного времени</span></div>
       <nav aria-label="Основная навигация"><a href="#plan">План</a><a href="#results">Результат</a></nav></header>
     <section className="intro" aria-labelledby="page-title"><div><p className="eyebrow">ТВОЯ ТИПИЧНАЯ НЕДЕЛЯ</p>
       <h1 id="page-title">Оставь место для жизни</h1>
@@ -118,92 +222,70 @@ export default function App() {
 
     <section id="plan" aria-labelledby="plan-title"><div className="section-heading"><h2 id="plan-title">Моя неделя</h2>
       <span>Выбери день, чтобы увидеть его план</span></div>
+      <div className="mobile-day-tabs" aria-label="Дни недели">{DAYS.map((day, index) => <button key={day}
+        type="button" aria-pressed={selectedDay === index} aria-controls="day-details"
+        className={selectedDay === index ? 'selected' : ''} onClick={() => setSelectedDay(index)}>{day}</button>)}</div>
       <div className="day-grid" aria-label="Дни недели">{DAYS.map((name, index) => {
-        const count = activities.filter(item => item.days.includes(index)).length;
+        const items = cardItems(visualSegments, index);
         const total = result?.days[index];
-        const categories = total ? Object.entries(total.categories)
-          .filter(([, minutes]) => minutes > 0)
-          .map(([category]) => LABELS[category as Category | 'travel']).join(', ') : '';
         return <button key={name} className={`day-card ${selectedDay === index ? 'selected' : ''}`}
-          aria-pressed={selectedDay === index} onClick={() => setSelectedDay(index)}>
-          <strong>{name}</strong><span>{total ? categories || 'Свободный день' : count ? `${count} ${count === 1 ? 'запись' : 'записи'}` : 'Нет записей'}</span>
-          <span className="day-free">{total ? formatMinutes(total.freeMinutes) : '—'}</span>
-          <small>{total ? (resultIsOld ? 'прошлый расчёт' : 'свободно') : 'после расчёта'}</small></button>;
+          aria-pressed={selectedDay === index} aria-controls="day-details" onClick={() => setSelectedDay(index)}>
+          <span className="day-card-heading"><strong>{name}</strong><span aria-hidden="true">{selectedDay === index ? '⌃' : '⌄'}</span></span>
+          <span className="day-card-activities">{items.length ? items.slice(0, 3).map((item, itemIndex) =>
+            <span className="day-card-activity" key={`${item.title}-${itemIndex}`}>
+              <span className={`category-dot category-${item.category}`} aria-hidden="true" />
+              <span className="day-card-name">{item.title}</span><b>{formatMinutes(item.minutes)}</b></span>)
+            : <span className="day-card-empty">Пока нет занятий</span>}
+            {items.length > 3 && <small>Ещё {items.length - 3}</small>}</span>
+          <span className="day-card-footer"><span className={`free-ring${total ? '' : ' pending'}`} aria-hidden="true" />
+            <span><small>Свободно</small><strong>{total ? formatMinutes(total.freeMinutes) : 'После расчёта'}</strong>
+              {total && resultIsOld && <small>прошлый расчёт</small>}</span></span></button>;
       })}</div>
-      <div className="workspace"><section className="panel day-panel" aria-labelledby="day-title">
+      <div className="workspace"><section id="day-details" className="panel day-panel" aria-labelledby="day-title">
         <div className="panel-heading"><div><p className="eyebrow">ПЛАН НА ДЕНЬ</p><h2 id="day-title">{DAYS[selectedDay]}</h2></div>
           <button className="secondary" onClick={() => openForm(newActivity(selectedDay))}>＋ Добавить</button></div>
-        <h3>Занятия, начинающиеся в {DAY_NAMES[selectedDay]}</h3>
-        {dayActivities.length ? <ul className="activity-list">{dayActivities.map(item => <li key={item.id} className="activity-item">
-          <span className={`category-dot category-${item.category}`} aria-hidden="true" />
-          <div className="activity-main"><strong>{item.title || LABELS[item.category]}</strong>
-            <span>{LABELS[item.category]} · {item.start}–{item.end}{item.end < item.start ? ' (+1 день)' : ''}</span></div>
-          <button className="text-button" onClick={() => openForm(item)}>Изменить</button>
-          <button className="text-button danger" onClick={() => deleteActivity(item)}>Удалить</button></li>)}</ul>
-          : <p className="empty">Пока нет занятий, начинающихся в этот день.</p>}
-        <h3>Шкала дня</h3>
-        {preview.ok ? (segments.length ? <ol className="timeline">{segments.map((segment: Segment, index) => <li
-          key={`${segment.activityId}-${segment.startMinute}-${index}`} className="timeline-row">
-          <time>{formatClock(segment.startMinute)}–{formatClock(segment.endMinute)}</time>
-          <span className={`category-dot category-${segment.category}`} aria-hidden="true" />
-          <span>{segment.category === 'travel' ? `Дорога · ${segment.title}` : segment.title || LABELS[segment.category]}</span>
-        </li>)}</ol> : <p className="empty">В этот день пока нет занятых интервалов.</p>)
-          : <p className="timeline-note">Исправь пересечения или время занятий, чтобы увидеть точную шкалу.</p>}
-      </section><aside className="panel summary" aria-labelledby="summary-title"><p className="eyebrow">БАЛАНС НЕДЕЛИ</p>
+        {dayActivities.length > 0 && <p className="day-context">{dayActivities.length} {dayActivities.length === 1 ? 'занятие начинается' : 'занятий начинаются'} в {DAY_NAMES[selectedDay]}</p>}
+        {!dayActivities.length && segments.length > 0 && <p className="day-context">Занятие продолжается с предыдущего дня.</p>}
+        {segments.length ? <TimeBlocks segments={segments} activities={activities} onEdit={openForm} />
+          : <div className="empty-plan"><p>Этот день пока свободен.</p><button className="secondary" onClick={() => openForm(newActivity(selectedDay))}>Добавить занятие</button></div>}
+        {!preview.ok && <p className="timeline-note" role="status">В расписании есть пересечения. Блоки показаны, но итог появится после исправления ошибок.</p>}
+        {segments.length > 0 && <p className="timeline-hint">Нажми на блок, чтобы изменить занятие.</p>}
+        {dayActivities.length > 0 && <div className="day-entries"><h3>Занятия дня</h3>
+          {dayActivities.map(item => <div className="day-entry" key={item.id}>
+            <span className={`category-dot category-${item.category}`} aria-hidden="true" />
+            <span>{item.title}<small>{item.start}–{item.end}{item.end < item.start ? ' · до следующего дня' : ''}</small></span>
+            <button className="text-button" onClick={() => openForm(item)}>Изменить</button></div>)}</div>}
+      </section><ActivityForm key={`${editing.id || 'new'}-${formVersion}`} initial={editing} onSave={saveActivity}
+        onCancel={closeForm} onDelete={editing.id ? () => deleteActivity(editing) : undefined} />
+      <aside id="results" className="panel summary" aria-labelledby="summary-title"><p className="eyebrow">БАЛАНС НЕДЕЛИ</p>
         <h2 id="summary-title">Свободное время</h2>{result ? <>
-          {resultIsOld && <p className="outdated" role="status">Предыдущий расчёт. План изменён — рассчитай снова.</p>}
-          <div className="big-number">{formatMinutes(result.weeklyFreeMinutes)}</div><p>свободно за неделю</p>
-          <div className="balance-bar" aria-label={`${formatMinutes(result.weeklyFreeMinutes)} свободно из 168 часов`}>
-            <span style={{ width: `${result.weeklyFreeMinutes / 10080 * 100}%` }} /></div>
-          <p><strong>{formatMinutes(result.weeklyOccupiedMinutes)}</strong> занято</p></>
-          : <p className="empty">Добавь занятия или рассчитай пустую неделю, чтобы увидеть итог.</p>}</aside></div></section>
-
-    <div className="actions"><button className="primary calculate" onClick={calculate}>Рассчитать неделю</button>
-      <button className="text-button danger" onClick={clearActivities} disabled={!activities.length}>Очистить расписание</button></div>
-    {errors.length > 0 && <div className="errors" role="alert"><strong>Не удалось рассчитать неделю</strong>
-      <ul>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
-
-    <section id="results" className="panel result" aria-labelledby="results-title"><div className="panel-heading"><div>
-      <p className="eyebrow">ИТОГ</p><h2 id="results-title">Как устроена твоя неделя</h2></div></div>
-      {result ? <>{resultIsOld && <p className="outdated" role="status">Показан предыдущий расчёт. Расписание изменилось.</p>}
-        <div className="result-totals"><div><span>Свободно</span><strong>{formatMinutes(result.weeklyFreeMinutes)}</strong></div>
-          <div><span>Занято</span><strong>{formatMinutes(result.weeklyOccupiedMinutes)}</strong></div></div>
-        <h3>По дням</h3><div className="day-results">{result.days.map((total, index) => <div className="day-result" key={index}>
-          <strong>{DAYS[index]}</strong><div className="day-result-bar" aria-hidden="true">
-            <span style={{ width: `${total.occupiedMinutes / 1440 * 100}%` }} /></div>
-          <span>Занято {formatMinutes(total.occupiedMinutes)}</span><span>Свободно {formatMinutes(total.freeMinutes)}</span>
-        </div>)}</div>
-        <h3>Структура недели</h3><div className="category-grid">
-          {Object.entries(result.categories).filter(([, minutes]) => minutes > 0).map(([key, minutes]) => <div className="category-row" key={key}>
-            <span className={`category-dot category-${key}`} aria-hidden="true" />
-            <span>{LABELS[key as Category | 'travel' | 'free']}</span>
-            <div className="category-bar" aria-hidden="true"><span style={{ width: `${minutes / 10080 * 100}%` }} /></div>
-            <strong>{formatMinutes(minutes)}</strong></div>)}</div></>
-        : <p className="empty">Здесь появятся итоги по дням и категориям после расчёта.</p>}</section>
-    <p className="privacy-note">Расписание сохраняется только в этом браузере. Очистить его можно в любой момент.</p>
-    {editing && <ActivityForm key={editing.id || 'new'} initial={editing} onSave={saveActivity}
-      onCancel={closeForm} onDelete={editing.id ? () => deleteActivity(editing) : undefined} />}
+          <div className="donut-row"><div className="donut" style={{ '--free-percent': `${result.weeklyFreeMinutes / 10080 * 100}%` } as React.CSSProperties}>
+            <span><strong>{formatMinutes(result.weeklyFreeMinutes)}</strong><small>свободно</small></span></div>
+            <div className="donut-caption"><strong>{Math.round(result.weeklyFreeMinutes / 10080 * 100)}%</strong><span>недели<br />для себя</span></div></div>
+          {resultIsOld && <p className="outdated" role="status">План изменён — рассчитай снова.</p>}
+          <h3>Свободно по дням</h3><div className="week-bars">{result.days.map((day, index) => <div className="week-bar-item" key={index}>
+            <strong>{formatMinutes(day.freeMinutes)}</strong><div className="week-bar-track"><span style={{ height: `${day.freeMinutes / 1440 * 100}%` }} /></div><small>{DAYS[index]}</small>
+          </div>)}</div>
+          <h3>Структура недели</h3><div className="category-grid">{Object.entries(result.categories).filter(([, minutes]) => minutes > 0)
+            .map(([key, minutes]) => <div className="category-row" key={key}>
+              <span className={`category-dot category-${key}`} aria-hidden="true" /><span>{LABELS[key as Category | 'travel' | 'free']}</span>
+              <strong>{formatMinutes(minutes)}</strong><div className="category-bar" aria-hidden="true"><span className={`category-${key}`} style={{ width: `${minutes / 10080 * 100}%` }} /></div>
+            </div>)}</div></>
+          : <div className="summary-empty"><span className="summary-placeholder" aria-hidden="true" /><p>Добавь занятия и рассчитай неделю. Здесь появится итог.</p></div>}
+        <button className="primary calculate" onClick={calculate}>Рассчитать неделю</button>
+        {errors.length > 0 && <div className="errors" role="alert"><strong>Не удалось рассчитать неделю</strong>
+          <ul>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
+      </aside></div></section>
+    <footer className="site-footer"><p>Расписание сохраняется только в этом браузере.</p>
+      <button className="text-button danger" onClick={clearActivities} disabled={!activities.length}>Очистить расписание</button></footer>
   </main>;
 }
 
 type ActivityFormProps = { initial: Activity; onSave: (item: Activity) => void; onCancel: () => void; onDelete?: () => void };
 function ActivityForm({ initial, onSave, onCancel, onDelete }: ActivityFormProps) {
   const [item, setItem] = useState(initial), [message, setMessage] = useState('');
+  const [returnTravelEdited, setReturnTravelEdited] = useState(initial.travelBeforeMinutes !== initial.travelAfterMinutes);
   const dialogRef = useRef<HTMLFormElement>(null), messageRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    dialogRef.current?.querySelector<HTMLInputElement>('input:not([disabled])')?.focus();
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') { event.preventDefault(); onCancel(); }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])')];
-      if (!focusable.length) return;
-      const first = focusable[0], last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
   useEffect(() => { if (message) messageRef.current?.focus(); }, [message]);
   function update(changes: Partial<Activity>) { setItem(current => ({ ...current, ...changes })); setMessage(''); }
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -218,19 +300,19 @@ function ActivityForm({ initial, onSave, onCancel, onDelete }: ActivityFormProps
     }
     onSave(item);
   }
-  return <div className="modal-backdrop"><form ref={dialogRef} className="form panel" role="dialog"
-    aria-modal="true" aria-labelledby="form-title" onSubmit={submit}>
+  return <form id="activity-form" ref={dialogRef} className="form panel"
+    aria-labelledby="form-title" onSubmit={submit}>
     <div className="panel-heading"><h2 id="form-title">{item.id ? 'Изменить занятие' : 'Добавить занятие'}</h2>
-      <button type="button" className="close-button" onClick={onCancel} aria-label="Закрыть форму">×</button></div>
-    <label>Категория<select value={item.category} onChange={event => {
-      const category = event.target.value as Category;
-      update({ category, title: category === 'sleep' ? 'Сон' : item.category === 'sleep' ? '' : item.title,
-        mode: category === 'sleep' ? 'online' : item.mode,
-        travelBeforeMinutes: category === 'sleep' ? 0 : item.travelBeforeMinutes,
-        travelAfterMinutes: category === 'sleep' ? 0 : item.travelAfterMinutes });
-    }}>{CATEGORIES.map(category => <option key={category} value={category}>{LABELS[category]}</option>)}</select></label>
+      {item.id && <button type="button" className="close-button" onClick={onCancel} aria-label="Закрыть редактирование">×</button>}</div>
     {item.category !== 'sleep' && <label>Название<input value={item.title} required placeholder="Например, спорт или встреча"
       onChange={event => update({ title: event.target.value })} /></label>}
+    <fieldset><legend>Категория</legend><div className="category-picker">{CATEGORIES.map(category => <button type="button" key={category}
+      className={item.category === category ? 'picked' : ''} aria-pressed={item.category === category}
+      onClick={() => { const preset = DEFAULTS[category];
+        update({ category, title: preset.title, start: preset.start, end: preset.end,
+          mode: preset.mode, travelBeforeMinutes: preset.travel, travelAfterMinutes: preset.travel });
+        setReturnTravelEdited(false); }}>
+      <span className={`category-dot category-${category}`} aria-hidden="true" />{LABELS[category]}</button>)}</div></fieldset>
     <fieldset><legend>Дни недели</legend><div className="day-picker">{DAYS.map((name, index) => <button type="button"
       key={name} className={item.days.includes(index) ? 'picked' : ''} aria-pressed={item.days.includes(index)}
       onClick={() => update({ days: item.days.includes(index) ? item.days.filter(day => day !== index) : [...item.days, index] })}>
@@ -245,12 +327,13 @@ function ActivityForm({ initial, onSave, onCancel, onDelete }: ActivityFormProps
     </div></fieldset>}
     {item.category !== 'sleep' && item.mode === 'offline' && <div className="form-grid">
       <label>Дорога туда, мин<input type="number" min="0" max="240" step="1" value={item.travelBeforeMinutes}
-        onChange={event => update({ travelBeforeMinutes: Number(event.target.value) })} /></label>
+        onChange={event => { const value = Number(event.target.value);
+          update({ travelBeforeMinutes: value, ...(!returnTravelEdited ? { travelAfterMinutes: value } : {}) }); }} /></label>
       <label>Дорога обратно, мин<input type="number" min="0" max="240" step="1" value={item.travelAfterMinutes}
-        onChange={event => update({ travelAfterMinutes: Number(event.target.value) })} /></label></div>}
+        onChange={event => { setReturnTravelEdited(true); update({ travelAfterMinutes: Number(event.target.value) }); }} /></label></div>}
     {message && <p ref={messageRef} className="form-error" role="alert" tabIndex={-1}>{message}</p>}
-    <div className="form-actions"><button type="button" className="text-button" onClick={onCancel}>Отмена</button>
+    <div className="form-actions">{item.id && <button type="button" className="text-button" onClick={onCancel}>Отмена</button>}
       {onDelete && <button type="button" className="text-button danger" onClick={onDelete}>Удалить</button>}
       <button className="primary" type="submit">{item.id ? 'Сохранить изменения' : 'Добавить'}</button></div>
-  </form></div>;
+  </form>;
 }
