@@ -208,7 +208,21 @@ export default function App() {
       mode: activity.category === 'sleep' ? 'online' : activity.mode,
       travelBeforeMinutes: activity.category === 'sleep' || activity.mode === 'online' ? 0 : activity.travelBeforeMinutes,
       travelAfterMinutes: activity.category === 'sleep' || activity.mode === 'online' ? 0 : activity.travelAfterMinutes };
-    const next = saveActivityForDays(activities, saved, editingDay, () => crypto.randomUUID());
+    let changedId = saved.id;
+    const next = saveActivityForDays(activities, saved, editingDay, () => {
+      changedId = crypto.randomUUID();
+      return changedId;
+    });
+    const check = calculateWeek(next);
+    if (!check.ok) {
+      const conflict = check.errors.find(error => error.code === 'conflict' && error.activityIds.includes(changedId));
+      if (conflict) {
+        const other = next.find(item => item.id === conflict.activityIds.find(id => id !== changedId));
+        return `Это время пересекается с «${other?.title || 'другим занятием'}» в ${DAYS[conflict.day ?? selectedDay]}. Измени время или день.`;
+      }
+      if (check.errors.some(error => error.code === 'validation' && error.activityIds.includes(changedId)))
+        return 'Проверь время и параметры занятия.';
+    }
     updateActivities(next);
     closeForm(next);
   }
@@ -224,7 +238,7 @@ export default function App() {
     if (calculated.ok) { setResult(calculated); setResultIsOld(false); setErrors([]); return; }
     const firstConflict = calculated.errors.find(error => error.day !== undefined);
     if (firstConflict?.day !== undefined) setSelectedDay(firstConflict.day);
-    setErrors(calculated.errors.map(error => {
+    setErrors(calculated.errors.slice(0, 1).map(error => {
       const names = [...new Set(error.activityIds)].map(id => activities.find(item => item.id === id))
         .map(item => item?.title || (item ? LABELS[item.category] : 'запись'));
       return `${error.message}${error.day === undefined ? '' : `, ${DAYS[error.day]}`}: ${names.join(' и ')}`;
@@ -308,7 +322,7 @@ export default function App() {
 }
 
 type ActivityFormProps = { initial: Activity; fixedDay: number | null; selectedDay: number;
-  onSave: (item: Activity) => void; onCancel: () => void; onDelete?: () => void };
+  onSave: (item: Activity) => string | undefined; onCancel: () => void; onDelete?: () => void };
 function ActivityForm({ initial, fixedDay, selectedDay, onSave, onCancel, onDelete }: ActivityFormProps) {
   const [item, setItem] = useState(initial), [message, setMessage] = useState('');
   const [returnTravelEdited, setReturnTravelEdited] = useState(initial.travelBeforeMinutes !== initial.travelAfterMinutes);
@@ -329,7 +343,8 @@ function ActivityForm({ initial, fixedDay, selectedDay, onSave, onCancel, onDele
       || item.travelBeforeMinutes > 240 || item.travelAfterMinutes > 240) {
       setMessage('Время дороги должно быть целым числом от 0 до 240 минут.'); return;
     }
-    onSave(item);
+    const error = onSave(item);
+    if (error) setMessage(error);
   }
   return <form id="activity-form" ref={dialogRef} className="form panel"
     aria-labelledby="form-title" onSubmit={submit}>

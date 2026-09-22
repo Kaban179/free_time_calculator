@@ -97,25 +97,23 @@ test('online overlap with travel is yellow and counted once', async ({ page }) =
   await page.screenshot({ path: 'test-results/online-overlap.png', fullPage: true });
 });
 
-test('conflicts keep both activities visible and editable', async ({ page }) => {
+test('conflicting activity is rejected when added', async ({ page }) => {
   await page.goto('/');
   const form = page.locator('#activity-form');
-  for (const title of ['Первая', 'Вторая']) {
-    await form.getByRole('button', { name: 'Работа', exact: true }).click();
-    await form.getByRole('textbox', { name: 'Название' }).fill(title);
-    await form.getByRole('button', { name: 'Добавить', exact: true }).click();
-  }
-  await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
-  await expect(page.getByRole('alert')).toContainText('пересекаются');
+  await form.getByRole('button', { name: 'Работа', exact: true }).click();
+  await form.getByRole('button', { name: 'Этот день' }).click();
+  await form.getByRole('button', { name: 'Добавить', exact: true }).click();
+  await form.getByRole('button', { name: 'Учёба', exact: true }).click();
+  await form.getByRole('button', { name: 'Этот день' }).click();
+  await form.getByLabel('Начало').fill('10:00');
+  await form.getByLabel('Конец').fill('11:00');
+  await form.getByRole('button', { name: 'Добавить', exact: true }).click();
+  await expect(form.getByRole('alert')).toContainText('пересекается с «Работа»');
+  await expect(page.locator('.day-entry')).toHaveCount(1);
+  await form.getByLabel('Начало').fill('19:00');
+  await form.getByLabel('Конец').fill('20:00');
+  await form.getByRole('button', { name: 'Добавить', exact: true }).click();
   await expect(page.locator('.day-entry')).toHaveCount(2);
-  await expect(page.locator('.time-block.category-work')).toHaveCount(2);
-  const [first, second] = await Promise.all([
-    page.locator('.time-block.category-work').nth(0).boundingBox(),
-    page.locator('.time-block.category-work').nth(1).boundingBox(),
-  ]);
-  expect(first && second && first.x + first.width <= second.x + 1).toBe(true);
-  await page.locator('.day-entry').filter({ hasText: 'Первая' }).getByRole('button', { name: 'Изменить' }).click();
-  await expect(form.getByRole('textbox', { name: 'Название' })).toHaveValue('Первая');
 });
 
 test('mobile layout keeps the page within the viewport', async ({ page }) => {
