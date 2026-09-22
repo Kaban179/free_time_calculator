@@ -17,6 +17,9 @@ test('sleep, offline travel, result and recalculation', async ({ page }) => {
   await form.getByLabel('Дорога обратно, мин').fill('30');
   await form.getByRole('button', { name: 'Добавить', exact: true }).click();
 
+  await page.reload();
+  await expect(page.locator('.activity-item').filter({ hasText: 'Офис' })).toBeVisible();
+
   await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
   const result = page.locator('#results');
   await expect(result).toContainText('158 ч');
