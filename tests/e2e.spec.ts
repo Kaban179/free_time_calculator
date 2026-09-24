@@ -23,6 +23,10 @@ test('defaults, mirrored travel, day cards and recalculation', async ({ page }) 
   await expect(form.getByLabel('Конец')).toHaveValue('18:00');
   await expect(form.getByLabel('Дорога туда, мин')).toHaveValue('30');
   await expect(form.getByLabel('Дорога обратно, мин')).toHaveValue('30');
+  await form.getByLabel('Дорога туда, мин').click();
+  await form.getByLabel('Дорога туда, мин').pressSequentially('70');
+  await expect(form.getByLabel('Дорога туда, мин')).toHaveValue('70');
+  await expect(form.getByLabel('Дорога обратно, мин')).toHaveValue('70');
   await form.getByLabel('Дорога туда, мин').fill('45');
   await expect(form.getByLabel('Дорога обратно, мин')).toHaveValue('45');
   await form.getByLabel('Дорога обратно, мин').fill('20');
@@ -40,6 +44,9 @@ test('defaults, mirrored travel, day cards and recalculation', async ({ page }) 
 
   await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
   await expect(page.locator('#results')).toContainText('158 ч 5 мин');
+  const categoryGrid = await page.locator('.category-grid').boundingBox();
+  const calculateButton = await page.getByRole('button', { name: 'Рассчитать неделю' }).boundingBox();
+  expect(categoryGrid && calculateButton && calculateButton.y - (categoryGrid.y + categoryGrid.height) >= 20).toBe(true);
   await page.locator('.time-block.category-work').click();
   await form.getByLabel('Конец').fill('11:00');
   await form.getByRole('button', { name: 'Сохранить изменения' }).click();
@@ -126,6 +133,11 @@ test('mobile layout keeps the page within the viewport', async ({ page }) => {
   await page.locator('.mobile-day-tabs').getByRole('button', { name: 'Ср' }).click();
   await expect(page.locator('.day-card:visible')).toHaveCount(1);
   await expect(page.locator('#day-title')).toHaveText('Ср');
+  await expect(page.locator('.sleep-day-help')).toHaveCount(0);
+  await page.locator('#activity-form').getByRole('button', { name: 'Добавить', exact: true }).click();
+  await page.getByRole('button', { name: 'Рассчитать неделю' }).click();
+  await expect(page.locator('.mobile-time:visible')).toHaveCount(7);
+  await expect(page.locator('.desktop-time:visible')).toHaveCount(0);
   const hasPageOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(hasPageOverflow).toBe(false);
   await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });

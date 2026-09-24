@@ -25,6 +25,12 @@ function formatMinutes(minutes: number): string {
   return hours ? (rest ? `${hours} ч ${rest} мин` : `${hours} ч`) : `${rest} мин`;
 }
 
+function formatCompactHours(minutes: number): string {
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = (minutes / 60).toFixed(1).replace(/\.0$/, '').replace('.', ',');
+  return `${hours} ч`;
+}
+
 function formatClock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
@@ -276,7 +282,10 @@ export default function App() {
           {result.overlapMinutes > 0 && <p className="overlap-note">Совмещено {formatMinutes(result.overlapMinutes)}. Эти минуты учтены один раз.</p>}
           {resultIsOld && <p className="outdated" role="status">План изменён — рассчитай снова.</p>}
           <h3>Свободно по дням</h3><div className="week-bars">{result.days.map((day, index) => <div className="week-bar-item" key={index}>
-            <strong>{formatMinutes(day.freeMinutes)}</strong><div className="week-bar-track"><span style={{ height: `${day.freeMinutes / 1440 * 100}%` }} /></div><small>{DAYS[index]}</small>
+            <strong aria-label={formatMinutes(day.freeMinutes)} title={formatMinutes(day.freeMinutes)}>
+              <span className="desktop-time" aria-hidden="true">{formatMinutes(day.freeMinutes)}</span>
+              <span className="mobile-time" aria-hidden="true">{formatCompactHours(day.freeMinutes)}</span>
+            </strong><div className="week-bar-track"><span style={{ height: `${day.freeMinutes / 1440 * 100}%` }} /></div><small>{DAYS[index]}</small>
           </div>)}</div>
           <h3>Структура недели</h3><div className="category-grid">{Object.entries(result.categories).filter(([, minutes]) => minutes > 0)
             .map(([key, minutes]) => <div className="category-row" key={key}>
@@ -341,7 +350,6 @@ function ActivityForm({ initial, fixedDay, selectedDay, onSave, onCancel, onDele
       <div className="day-shortcuts"><button type="button" onClick={() => { setDaysEdited(true); update({ days: [selectedDay] }); }}>Этот день</button>
         <button type="button" onClick={() => { setDaysEdited(true); update({ days: [0, 1, 2, 3, 4] }); }}>Будни</button>
         <button type="button" onClick={() => { setDaysEdited(true); update({ days: [0, 1, 2, 3, 4, 5, 6] }); }}>Каждый день</button></div>
-      {item.category === 'sleep' && <small className="sleep-day-help">Для сна выбери день, когда просыпаешься.</small>}
       <div className="day-picker">{DAYS.map((name, index) => <button type="button"
       key={name} className={item.days.includes(index) ? 'picked' : ''} aria-pressed={item.days.includes(index)}
       onClick={() => { setDaysEdited(true); update({ days: item.days.includes(index) ? item.days.filter(day => day !== index) : [...item.days, index] }); }}>
@@ -359,10 +367,14 @@ function ActivityForm({ initial, fixedDay, selectedDay, onSave, onCancel, onDele
     </div></fieldset>}
     {item.category !== 'sleep' && item.mode === 'offline' && <div className="form-grid">
       <label>Дорога туда, мин<input type="number" min="0" max="240" step="1" value={item.travelBeforeMinutes}
+        onFocus={event => event.currentTarget.select()}
         onChange={event => { const value = Number(event.target.value);
-          update({ travelBeforeMinutes: value, ...(!returnTravelEdited ? { travelAfterMinutes: value } : {}) }); }} /></label>
+          update({ travelBeforeMinutes: value, ...(!returnTravelEdited ? { travelAfterMinutes: value } : {}) }); }}
+        onBlur={event => { event.currentTarget.value = String(item.travelBeforeMinutes); }} /></label>
       <label>Дорога обратно, мин<input type="number" min="0" max="240" step="1" value={item.travelAfterMinutes}
-        onChange={event => { setReturnTravelEdited(true); update({ travelAfterMinutes: Number(event.target.value) }); }} /></label></div>}
+        onFocus={event => event.currentTarget.select()}
+        onChange={event => { setReturnTravelEdited(true); update({ travelAfterMinutes: Number(event.target.value) }); }}
+        onBlur={event => { event.currentTarget.value = String(item.travelAfterMinutes); }} /></label></div>}
     {message && <p ref={messageRef} className="form-error" role="alert" tabIndex={-1}>{message}</p>}
     <div className="form-actions">{item.id && <button type="button" className="text-button" onClick={onCancel}>Отмена</button>}
       {onDelete && <button type="button" className="text-button danger" onClick={onDelete}>Удалить</button>}
